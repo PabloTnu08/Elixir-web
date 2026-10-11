@@ -1,359 +1,120 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ELIXIR</title>
-    <!-- Supabase JS Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <style>
-        :root {
-            --bg: #0a0a0a;
-            --surface: #141414;
-            --border: #262626;
-            --text: #f5f5f5;
-            --muted: #888888;
-            --accent: #ffffff;
+// Configuración de Supabase
+const SUPABASE_URL = 'https://ojrxjgfjnsbnjplqnall.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_432fYrFKU4G3HMa6Y9XKtg_1YjuMXWL';
+
+const { createClient } = supabase;
+const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const WHATSAPP_LINK = 'https://wa.link/50jjzl';
+
+// Verificar Modo Admin por Ruta (#admin)
+window.addEventListener('DOMContentLoaded', () => {
+    if (window.location.hash === '#admin') {
+        const pass = prompt('Ingresa la contraseña de administrador:');
+        if (pass === '33345891') {
+            document.getElementById('admin-panel').style.display = 'block';
+        } else {
+            alert('Contraseña incorrecta');
+            window.location.hash = '';
         }
+    }
+    loadProducts();
+});
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: system-ui, -apple-system, sans-serif;
-        }
+// Cargar Productos desde Supabase
+async function loadProducts() {
+    const container = document.getElementById('products-container');
+    
+    const { data, error } = await _supabase
+        .from('products')
+        .select('*')
+        .order('id', { ascending: false });
 
-        body {
-            background-color: var(--bg);
-            color: var(--text);
-            padding: 20px;
-            max-width: 600px;
-            margin: 0 auto;
-        }
+    if (error) {
+        console.error(error);
+        container.innerHTML = '<div class="message">Error al cargar la tienda.</div>';
+        return;
+    }
 
-        header {
-            text-align: center;
-            padding: 40px 0 20px 0;
-            border-bottom: 1px solid var(--border);
-            margin-bottom: 20px;
-        }
+    if (!data || data.length === 0) {
+        container.innerHTML = '<div class="message">No hay productos aún. Entra como admin para agregar.</div>';
+        return;
+    }
 
-        h1 {
-            font-size: 2.5rem;
-            letter-spacing: 4px;
-            margin-bottom: 10px;
-        }
+    container.innerHTML = '';
+    data.forEach(product => {
+        const card = document.createElement('div');
+        card.className = 'product-card';
+        card.innerHTML = `
+            <img src="${product.image_url}" class="product-img" onclick="openModal('${product.image_url}')" alt="${product.name}">
+            <div class="product-info">
+                <span class="product-name">${product.name}</span>
+                <span class="product-price">$${product.price}</span>
+            </div>
+            <a href="${WHATSAPP_LINK}" target="_blank" class="whatsapp-btn">Consultar al WhatsApp</a>
+        `;
+        container.appendChild(card);
+    });
+}
 
-        .subtitle {
-            font-size: 0.9rem;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 5px;
-        }
+// Subir Producto
+async function uploadProduct() {
+    const name = document.getElementById('prod-name').value.trim();
+    const price = document.getElementById('prod-price').value.trim();
+    const fileInput = document.getElementById('prod-file');
 
-        .whatsapp-note {
-            font-size: 0.85rem;
-            color: var(--muted);
-            margin-top: 10px;
-        }
+    if (!name || !price || fileInput.files.length === 0) {
+        alert('Por favor completa todos los campos y selecciona una imagen.');
+        return;
+    }
 
-        #admin-panel {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 30px;
-            display: none;
-        }
+    const file = fileInput.files[0];
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Date.now()}.${fileExt}`;
+    const filePath = `${fileName}`;
 
-        #admin-panel h2 {
-            font-size: 1.2rem;
-            margin-bottom: 15px;
-        }
+    alert('Subiendo producto, por favor espera...');
 
-        .form-group {
-            margin-bottom: 15px;
-        }
+    // 1. Subir imagen a Storage
+    const { error: uploadError } = await _supabase.storage
+        .from('product-images')
+        .upload(filePath, file);
 
-        .form-group label {
-            display: block;
-            font-size: 0.85rem;
-            color: var(--muted);
-            margin-bottom: 5px;
-        }
+    if (uploadError) {
+        alert('Error al subir la imagen: ' + uploadError.message);
+        return;
+    }
 
-        .form-group input {
-            width: 100%;
-            padding: 10px;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            color: var(--text);
-            border-radius: 4px;
-        }
+    // 2. Obtener URL pública de la imagen
+    const { data: publicURLData } = _supabase.storage
+        .from('product-images')
+        .getPublicUrl(filePath);
 
-        button {
-            width: 100%;
-            padding: 12px;
-            background: var(--accent);
-            color: var(--bg);
-            border: none;
-            font-weight: bold;
-            border-radius: 4px;
-            cursor: pointer;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
+    const imageUrl = publicURLData.publicUrl;
 
-        button:hover {
-            opacity: 0.9;
-        }
+    // 3. Guardar registro en la tabla products
+    const { error: insertError } = await _supabase
+        .from('products')
+        .insert([{ name, price: parseFloat(price), image_url: imageUrl }]);
 
-        .products-grid {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
+    if (insertError) {
+        alert('Error al guardar en la base de datos: ' + insertError.message);
+        return;
+    }
 
-        .product-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
+    alert('¡Producto publicado con éxito!');
+    document.getElementById('prod-name').value = '';
+    document.getElementById('prod-price').value = '';
+    fileInput.value = '';
+    loadProducts();
+}
 
-        .product-img {
-            width: 100%;
-            height: 300px;
-            object-fit: cover;
-            cursor: pointer;
-        }
+// Funciones del Modal
+function openModal(url) {
+    document.getElementById('modal-img').src = url;
+    document.getElementById('modal').style.display = 'flex';
+}
 
-        .product-info {
-            padding: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .product-name {
-            font-size: 1.1rem;
-            font-weight: 500;
-        }
-
-        .product-price {
-            font-size: 1.1rem;
-            color: var(--muted);
-        }
-
-        .whatsapp-btn {
-            display: block;
-            text-align: center;
-            background: #25d366;
-            color: #fff;
-            text-decoration: none;
-            padding: 12px;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-
-        /* Modal para ver imagen grande */
-        #modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.9);
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            padding: 20px;
-        }
-
-        #modal img {
-            max-width: 100%;
-            max-height: 90vh;
-            object-fit: contain;
-        }
-
-        #modal-close {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            color: #fff;
-            font-size: 2rem;
-            cursor: pointer;
-        }
-
-        .message {
-            text-align: center;
-            color: var(--muted);
-            padding: 40px 0;
-        }
-    </style>
-</head>
-<body>
-
-    <header>
-        <h1>ELIXIR</h1>
-        <div class="subtitle">Catálogo Exclusivo</div>
-        <div class="whatsapp-note">Contamos con más variedad de mercancía, consultar al WhatsApp</div>
-    </header>
-
-    <!-- Panel de Administración -->
-    <div id="admin-panel">
-        <h2>Panel de Administración</h2>
-        <div class="form-group">
-            <label>Nombre del producto</label>
-            <input type="text" id="prod-name" placeholder="Ej. Camisa Oversize">
-        </div>
-        <div class="form-group">
-            <label>Precio ($)</label>
-            <input type="number" id="prod-price" placeholder="Ej. 25">
-        </div>
-        <div class="form-group">
-            <label>Imagen</label>
-            <input type="file" id="prod-file" accept="image/*">
-        </div>
-        <button onclick="uploadProduct()">Subir Producto</button>
-    </div>
-
-    <!-- Lista de Productos -->
-    <div id="products-container" class="products-grid">
-        <div class="message">Cargando tienda...</div>
-    </div>
-
-    <!-- Modal de Imagen -->
-    <div id="modal" onclick="closeModal()">
-        <span id="modal-close">&times;</span>
-        <img id="modal-img" src="" alt="Ampliada">
-    </div>
-
-    <script>
-        // Configuración de Supabase
-        const SUPABASE_URL = 'https://ojrxjgfjnsbnjplqnall.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_432fYrFKU4G3HMa6Y9XKtg_1YjuMXWL';
-        
-        const { createClient } = supabase;
-        const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        const WHATSAPP_LINK = 'https://wa.link/50jjzl';
-
-        // Verificar Modo Admin por Ruta (#admin)
-        window.addEventListener('DOMContentLoaded', () => {
-            if (window.location.hash === '#admin') {
-                const pass = prompt('Ingresa la contraseña de administrador:');
-                if (pass === '33345891') {
-                    document.getElementById('admin-panel').style.display = 'block';
-                } else {
-                    alert('Contraseña incorrecta');
-                    window.location.hash = '';
-                }
-            }
-            loadProducts();
-        });
-
-        // Cargar Productos desde Supabase
-        async function loadProducts() {
-            const container = document.getElementById('products-container');
-            
-            const { data, error } = await _supabase
-                .from('products')
-                .select('*')
-                .order('id', { ascending: false });
-
-            if (error) {
-                console.error(error);
-                container.innerHTML = '<div class="message">Error al cargar la tienda.</div>';
-                return;
-            }
-
-            if.length === 0 {
-                container.innerHTML = '<div class="message">No hay productos aún. Entra como admin para agregar.</div>';
-                return;
-            }
-
-            container.innerHTML = '';
-            data.forEach(product => {
-                const card = document.createElement('div');
-                card.className = 'product-card';
-                card.innerHTML = `
-                    <img src="${product.image_url}" class="product-img" onclick="openModal('${product.image_url}')" alt="${product.name}">
-                    <div class="product-info">
-                        <span class="product-name">${product.name}</span>
-                        <span class="product-price">$${product.price}</span>
-                    </div>
-                    <a href="${WHATSAPP_LINK}" target="_blank" class="whatsapp-btn">Consultar al WhatsApp</a>
-                `;
-                container.appendChild(card);
-            });
-        }
-
-        // Subir Producto
-        async function uploadProduct() {
-            const name = document.getElementById('prod-name').value.trim();
-            const price = document.getElementById('prod-price').value.trim();
-            const fileInput = document.getElementById('prod-file');
-
-            if (!name || !price || fileInput.files.length === 0) {
-                alert('Por favor completa todos los campos y selecciona una imagen.');
-                return;
-            }
-
-            const file = fileInput.files[0];
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Date.now()}.${fileExt}`;
-            const filePath = `${fileName}`;
-
-            alert('Subiendo producto, por favor espera...');
-
-            // 1. Subir imagen a Storage
-            const { error: uploadError } = await _supabase.storage
-                .from('product-images')
-                .upload(filePath, file);
-
-            if (uploadError) {
-                alert('Error al subir la imagen: ' + uploadError.message);
-                return;
-            }
-
-            // 2. Obtener URL pública de la imagen
-            const { data: publicURLData } = _supabase.storage
-                .from('product-images')
-                .getPublicUrl(filePath);
-
-            const imageUrl = publicURLData.publicUrl;
-
-            // 3. Guardar registro en la tabla products
-            const { error: insertError } = await _supabase
-                .from('products')
-                .insert([{ name, price: parseFloat(price), image_url: imageUrl }]);
-
-            if (insertError) {
-                alert('Error al guardar en la base de datos: ' + insertError.message);
-                return;
-            }
-
-            alert('¡Producto publicado con éxito!');
-            document.getElementById('prod-name').value = '';
-            document.getElementById('prod-price').value = '';
-            fileInput.value = '';
-            loadProducts();
-        }
-
-        // Funciones del Modal
-        function openModal(url) {
-            document.getElementById('modal-img').src = url;
-            document.getElementById('modal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('modal').style.display = 'none';
-        }
-    </script>
-</body>
-</html>
+function closeModal() {
+    document.getElementById('modal').style.display = 'none';
+}
