@@ -1,10 +1,11 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ELIXIR</title>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         :root {
             --bg: #0a0a0a;
@@ -107,11 +108,26 @@
             object-fit: cover;
         }
 
-        .placeholder-text {
-            color: var(--muted);
-            font-size: 0.8rem;
-            text-align: center;
-            padding: 10px;
+        .product-info {
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .product-title {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .product-price {
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--accent);
         }
 
         .btn-consult {
@@ -119,15 +135,68 @@
             color: var(--text);
             border: none;
             border-top: 1px solid var(--border);
-            padding: 12px;
+            padding: 10px;
             font-weight: 600;
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             letter-spacing: 1px;
             text-transform: uppercase;
             cursor: pointer;
             text-decoration: none;
             text-align: center;
             display: block;
+        }
+
+        /* ADMIN PANEL STYLES */
+        #admin-panel {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+
+        #admin-panel h3 {
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .btn-submit {
+            background: var(--accent);
+            color: var(--bg);
+            border: none;
+            padding: 10px 15px;
+            font-weight: 700;
+            width: 100%;
+            border-radius: 6px;
+            cursor: pointer;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+            margin-top: 5px;
         }
 
         /* MODAL / VISOR DE IMAGEN */
@@ -183,7 +252,27 @@
         <div class="sub-tagline">Contamos con más variedad de mercancía, consultar al WhatsApp</div>
     </header>
 
-    <main class="gallery-grid" id="gallery"></main>
+    <!-- PANEL ADMIN (SE ACTIVA CON #admin en el navegador) -->
+    <div id="admin-panel">
+        <h3>Panel de Administración</h3>
+        <div class="form-group">
+            <label>Nombre del Producto</label>
+            <input type="text" id="prodName" placeholder="Ej: Camisa Oversize">
+        </div>
+        <div class="form-group">
+            <label>Precio ($)</label>
+            <input type="number" id="prodPrice" placeholder="Ej: 25">
+        </div>
+        <div class="form-group">
+            <label>Imagen del Producto</label>
+            <input type="file" id="prodImage" accept="image/*">
+        </div>
+        <button class="btn-submit" onclick="uploadProduct()">Subir Producto</button>
+    </div>
+
+    <main class="gallery-grid" id="gallery">
+        <p style="color: var(--muted); text-align: center; grid-column: 1/-1;">Cargando productos...</p>
+    </main>
 
     <!-- VENTANA PARA VER LA IMAGEN EN GRANDE -->
     <div id="imageModal" class="modal" onclick="closeModal()">
@@ -196,31 +285,106 @@
     </footer>
 
     <script>
-        // ENLACE DIRECTO A TU WHATSAPP
+        // --- CONFIGURACIÓN DE SUPABASE ---
+        const SUPABASE_URL = "https://ojrxjgfjnsbnjplqnall.supabase.co"; //
+        const SUPABASE_ANON_KEY = "Sb_publishable_432fYrFKU4G3HMa6Y9XKtg_1YjuMXWL";
+        
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         const WA_LINK = "https://wa.link/50jjzl";
 
-        // EXACTAMENTE 8 ESPACIOS PARA IMÁGENES
-        const productImages = [
-            "imagen1.jpg",
-            "imagen2.jpg",
-            "imagen3.jpg",
-            "imagen4.jpg",
-            "imagen5.jpg",
-            "imagen6.jpg",
-            "imagen7.jpg",
-            "imagen8.jpg"
-        ];
-
-        function renderGallery() {
+        // Cargar productos al abrir la página
+        async function fetchProducts() {
             const container = document.getElementById("gallery");
-            container.innerHTML = productImages.map((imgSrc, index) => `
+            const { data, error } = await supabaseClient.from('products').select('*').order('id', { ascending: false });
+
+            if (error) {
+                console.error('Error al cargar:', error);
+                container.innerHTML = `<p style="color: var(--muted); text-align: center; grid-column: 1/-1;">Error al cargar la tienda.</p>`;
+                return;
+            }
+
+            if (!data || data.length === 0) {
+                container.innerHTML = `<p style="color: var(--muted); text-align: center; grid-column: 1/-1;">No hay productos aún. Entra como admin para agregar.</p>`;
+                return;
+            }
+
+            container.innerHTML = data.map(product => `
                 <div class="product-card">
-                    <div class="image-container" onclick="openModal('${imgSrc}')">
-                        <img src="${imgSrc}" alt="Producto ELIXIR" onerror="this.onerror=null; this.parentNode.innerHTML='<div class=\'placeholder-text\'>Imagen ${index + 1}<br>(Agregar foto)</div>';">
+                    <div class="image-container" onclick="openModal('${product.image_url}')">
+                        <img src="${product.image_url}" alt="${product.name}">
+                    </div>
+                    <div class="product-info">
+                        <div class="product-title">${product.name}</div>
+                        <div class="product-price">$${product.price}</div>
                     </div>
                     <a href="${WA_LINK}" target="_blank" class="btn-consult">Consultar</a>
                 </div>
             `).join('');
+        }
+
+        // Subir nuevo producto desde el panel
+        async function uploadProduct() {
+            const name = document.getElementById('prodName').value;
+            const price = document.getElementById('prodPrice').value;
+            const fileInput = document.getElementById('prodImage');
+            const file = fileInput.files[0];
+
+            if (!name || !price || !file) {
+                alert("Por favor completa todos los campos y selecciona una imagen.");
+                return;
+            }
+
+            alert("Subiendo producto, por favor espera...");
+
+            // 1. Subir imagen a Supabase Storage
+            const fileName = `${Date.now()}_${file.name}`;
+            const { data: uploadData, error: uploadError } = await supabaseClient.storage
+                .from('product-images')
+                .upload(fileName, file);
+
+            if (uploadError) {
+                alert("Error al subir la imagen: " + uploadError.message);
+                return;
+            }
+
+            // 2. Obtener URL pública de la imagen
+            const { data: publicURLData } = supabaseClient.storage
+                .from('product-images')
+                .getPublicUrl(fileName);
+
+            const image_url = publicURLData.publicUrl;
+
+            // 3. Guardar registro en la tabla products
+            const { error: insertError } = await supabaseClient
+                .from('products')
+                .insert([{ name, price: parseFloat(price), image_url }]);
+
+            if (insertError) {
+                alert("Error al guardar el producto: " + insertError.message);
+                return;
+            }
+
+            alert("¡Producto publicado con éxito!");
+            document.getElementById('prodName').value = '';
+            document.getElementById('prodPrice').value = '';
+            fileInput.value = '';
+            fetchProducts();
+        }
+
+        // Sistema de Admin por URL (#admin con contraseña)
+        window.addEventListener('hashchange', checkAdmin);
+        function checkAdmin() {
+            if (window.location.hash === '#admin') {
+                const pass = prompt("Contraseña de Administrador:");
+                if (pass === "33345891") {
+                    document.getElementById('admin-panel').style.display = 'block';
+                } else {
+                    alert("Contraseña incorrecta");
+                    window.location.hash = '';
+                }
+            } else {
+                document.getElementById('admin-panel').style.display = 'none';
+            }
         }
 
         function openModal(imgSrc) {
@@ -234,7 +398,9 @@
             document.getElementById("imageModal").style.display = "none";
         }
 
-        renderGallery();
+        // Inicializar
+        checkAdmin();
+        fetchProducts();
     </script>
 </body>
 </html>
