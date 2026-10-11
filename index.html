@@ -218,5 +218,55 @@
             }
 
             const file = fileInput.files[0];
-            const fileExt = file.name.split('.').
-                
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Date.now()}.${fileExt}`;
+            const filePath = `${fileName}`;
+
+            alert('Subiendo producto, por favor espera...');
+
+            // 1. Subir imagen a Storage
+            const { error: uploadError } = await _supabase.storage
+                .from('product-images')
+                .upload(filePath, file);
+
+            if (uploadError) {
+                alert('Error al subir la imagen: ' + uploadError.message);
+                return;
+            }
+
+            // 2. Obtener URL pública de la imagen
+            const { data: publicURLData } = _supabase.storage
+                .from('product-images')
+                .getPublicUrl(filePath);
+
+            const imageUrl = publicURLData.publicUrl;
+
+            // 3. Guardar registro en la tabla products
+            const { error: insertError } = await _supabase
+                .from('products')
+                .insert([{ name, price: parseFloat(price), image_url: imageUrl }]);
+
+            if (insertError) {
+                alert('Error al guardar en la base de datos: ' + insertError.message);
+                return;
+            }
+
+            alert('¡Producto publicado con éxito!');
+            document.getElementById('prod-name').value = '';
+            document.getElementById('prod-price').value = '';
+            fileInput.value = '';
+            loadProducts();
+        }
+
+        // Funciones del Modal
+        function openModal(url) {
+            document.getElementById('modal-img').src = url;
+            document.getElementById('modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
