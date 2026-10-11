@@ -45,14 +45,23 @@
             color: #fff;
             box-sizing: border-box;
         }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
         #admin-panel button {
-            width: 100%;
+            flex: 1;
             padding: 10px;
             background: #fff;
             color: #000;
             border: none;
             font-weight: bold;
             cursor: pointer;
+        }
+        #cancel-btn {
+            background: #444 !important;
+            color: #fff !important;
+            display: none;
         }
         .products-grid {
             display: grid;
@@ -68,6 +77,7 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            position: relative;
         }
         .product-img {
             width: 100%;
@@ -99,6 +109,22 @@
             font-weight: bold;
             display: block;
         }
+        .admin-controls {
+            display: flex;
+            background: #222;
+            border-top: 1px solid #333;
+        }
+        .admin-controls button {
+            flex: 1;
+            padding: 6px;
+            font-size: 11px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-edit { background: #ff9800; color: #fff; }
+        .btn-delete { background: #f44336; color: #fff; }
+
         .message {
             text-align: center;
             color: #888;
@@ -129,11 +155,18 @@
 
     <!-- Panel de Administración Oculto -->
     <div id="admin-panel">
-        <h3>Panel de Administración</h3>
+        <h3 id="panel-title">Agregar Producto</h3>
+        <input type="hidden" id="edit-prod-id">
+        <input type="hidden" id="edit-prod-image-url">
+        
         <input type="text" id="prod-name" placeholder="Nombre del producto">
         <input type="number" id="prod-price" placeholder="Precio ($)">
         <input type="file" id="prod-file" accept="image/*">
-        <button onclick="uploadProduct()">Subir Producto</button>
+        
+        <div class="btn-group">
+            <button id="save-btn" onclick="saveProduct()">Subir Producto</button>
+            <button id="cancel-btn" onclick="resetForm()">Cancelar</button>
+        </div>
     </div>
 
     <!-- Contenedor de Productos -->
@@ -147,7 +180,6 @@
     </div>
 
     <script>
-        // Configuración de Supabase
         const SUPABASE_URL = 'https://ojrxjgfjnsbnjplqnall.supabase.co';
         const SUPABASE_ANON_KEY = 'sb_publishable_432fYrFKU4G3HMa6Y9XKtg_1YjuMXWL';
 
@@ -155,12 +187,14 @@
         const _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         const WHATSAPP_LINK = 'https://wa.link/50jjzl';
+        let isAdmin = false;
 
         // Verificar Modo Admin por Ruta (#admin)
         window.addEventListener('DOMContentLoaded', () => {
             if (window.location.hash === '#admin') {
                 const pass = prompt('Ingresa la contraseña de administrador:');
                 if (pass === '33345891') {
+                    isAdmin = true;
                     document.getElementById('admin-panel').style.display = 'block';
                 } else {
                     alert('Contraseña incorrecta');
@@ -194,6 +228,17 @@
             data.forEach(product => {
                 const card = document.createElement('div');
                 card.className = 'product-card';
+                
+                let adminButtons = '';
+                if (isAdmin) {
+                    adminButtons = `
+                        <div class="admin-controls">
+                            <button class="btn-edit" onclick="startEdit(${product.id}, '${escapeHtml(product.name)}', ${product.price}, '${product.image_url}')">Editar</button>
+                            <button class="btn-delete" onclick="deleteProduct(${product.id})">Eliminar</button>
+                        </div>
+                    `;
+                }
+
                 card.innerHTML = `
                     <img src="${product.image_url}" class="product-img" onclick="openModal('${product.image_url}')" alt="${product.name}">
                     <div class="product-info">
@@ -201,61 +246,131 @@
                         <span class="product-price">$${product.price}</span>
                     </div>
                     <a href="${WHATSAPP_LINK}" target="_blank" class="whatsapp-btn">Consultar al WhatsApp</a>
+                    ${adminButtons}
                 `;
                 container.appendChild(card);
             });
         }
 
-        // Subir Producto
-        async function uploadProduct() {
+        // Crear o Editar Producto
+        async function saveProduct() {
+            const editId = document.getElementById('edit-prod-id').value;
             const name = document.getElementById('prod-name').value.trim();
             const price = document.getElementById('prod-price').value.trim();
             const fileInput = document.getElementById('prod-file');
+            let imageUrl = document.getElementById('edit-prod-image-url').value;
 
-            if (!name || !price || fileInput.files.length === 0) {
-                alert('Por favor completa todos los campos y selecciona una imagen.');
+            if (!name || !price) {
+                alert('Por favor completa el nombre y el precio.');
                 return;
             }
 
-            const file = fileInput.files[0];
-            const fileExt = file.name.split('.').pop();
-            const fileName = `${Date.now()}.${fileExt}`;
-            const filePath = `${fileName}`;
-
-            alert('Subiendo producto, por favor espera...');
-
-            // 1. Subir imagen a Storage
-            const { error: uploadError } = await _supabase.storage
-                .from('product-images')
-                .upload(filePath, file);
-
-            if (uploadError) {
-                alert('Error al subir la imagen: ' + uploadError.message);
+            // Si se está creando uno nuevo y no hay imagen, exigirla
+            if (!editId && fileInput.files.length === 0) {
+                alert('Por favor selecciona una imagen para el producto.');
                 return;
             }
 
-            // 2. Obtener URL pública de la imagen
-            const { data: publicURLData } = _supabase.storage
-                .from('product-images')
-                .getPublicUrl(filePath);
+            alert('Procesando, por favor espera...');
 
-            const imageUrl = publicURLData.publicUrl;
+            // Si seleccionó una nueva imagen, subirla a Storage
+            if (fileInput.files.length > 0) {
+                const file = fileInput.files[0];
+                const fileExt = file.name.split('.').pop();
+                const fileName = `${Date.now()}.${fileExt}`;
 
-            // 3. Guardar registro en la tabla products
-            const { error: insertError } = await _supabase
+                const { error: uploadError } = await _supabase.storage
+                    .from('product-images')
+                    .upload(fileName, file);
+
+                if (uploadError) {
+                    alert('Error al subir la imagen: ' + uploadError.message);
+                    return;
+                }
+
+                const { data: publicURLData } = _supabase.storage
+                    .from('product-images')
+                    .getPublicUrl(fileName);
+
+                imageUrl = publicURLData.publicUrl;
+            }
+
+            if (editId) {
+                // Actualizar registro existente
+                const { error: updateError } = await _supabase
+                    .from('products')
+                    .update({ name, price: parseFloat(price), image_url: imageUrl })
+                    .eq('id', editId);
+
+                if (updateError) {
+                    alert('Error al actualizar: ' + updateError.message);
+                    return;
+                }
+                alert('¡Producto actualizado con éxito!');
+            } else {
+                // Insertar nuevo registro
+                const { error: insertError } = await _supabase
+                    .from('products')
+                    .insert([{ name, price: parseFloat(price), image_url: imageUrl }]);
+
+                if (insertError) {
+                    alert('Error al guardar: ' + insertError.message);
+                    return;
+                }
+                alert('¡Producto publicado con éxito!');
+            }
+
+            resetForm();
+            loadProducts();
+        }
+
+        // Iniciar modo edición
+        function startEdit(id, name, price, imageUrl) {
+            document.getElementById('panel-title').innerText = 'Editar Producto';
+            document.getElementById('edit-prod-id').value = id;
+            document.getElementById('prod-name').value = name;
+            document.getElementById('prod-price').value = price;
+            document.getElementById('edit-prod-image-url').value = imageUrl;
+            
+            document.getElementById('save-btn').innerText = 'Guardar Cambios';
+            document.getElementById('cancel-btn').style.display = 'block';
+            
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Eliminar producto
+        async function deleteProduct(id) {
+            if (!confirm('¿Estás seguro de que deseas eliminar este producto?')) return;
+
+            const { error } = await _supabase
                 .from('products')
-                .insert([{ name, price: parseFloat(price), image_url: imageUrl }]);
+                .delete()
+                .eq('id', id);
 
-            if (insertError) {
-                alert('Error al guardar en la base de datos: ' + insertError.message);
+            if (error) {
+                alert('Error al eliminar: ' + error.message);
                 return;
             }
 
-            alert('¡Producto publicado con éxito!');
+            alert('Producto eliminado.');
+            loadProducts();
+        }
+
+        // Limpiar formulario y restablecer a modo Agregar
+        function resetForm() {
+            document.getElementById('panel-title').innerText = 'Agregar Producto';
+            document.getElementById('edit-prod-id').value = '';
+            document.getElementById('edit-prod-image-url').value = '';
             document.getElementById('prod-name').value = '';
             document.getElementById('prod-price').value = '';
-            fileInput.value = '';
-            loadProducts();
+            document.getElementById('prod-file').value = '';
+            
+            document.getElementById('save-btn').innerText = 'Subir Producto';
+            document.getElementById('cancel-btn').style.display = 'none';
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         }
 
         // Funciones del Modal
